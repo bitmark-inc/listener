@@ -60,7 +60,7 @@ type ClientConnection struct {
 }
 
 // the call back routine reads, writes and finally closes a connection
-type Callback func(conn *ClientConnection, argument interface{})
+type Callback func(conn io.ReadWriteCloser, argument interface{})
 
 // read from the Client connection
 //
