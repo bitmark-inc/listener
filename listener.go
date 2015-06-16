@@ -115,7 +115,7 @@ func (conn *ClientConnection) Close() error {
 //
 // Open a listining port and start a go routine to handle the actual
 // accepts.  Return a struct that can be used to shutdown the listener
-// and all actiuve connections in an orderly manner.
+// and all active connections in an orderly manner.
 //
 // Note that tcpversion must be either "tcp4" or "tcp6"
 // and the listenAddress must be the a valip IPv4:port or IPv6:port
