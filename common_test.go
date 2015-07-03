@@ -9,7 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"github.com/bitmark-inc/certgen"
-	"github.com/bitmark-inc/listener"
+	"io"
 	"io/ioutil"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -104,7 +104,7 @@ type CallbackArguments struct {
 }
 
 // listener callback
-func callback(conn *listener.ClientConnection, argument interface{}) {
+func callback(conn io.ReadWriteCloser, argument interface{}) {
 	arguments := argument.(*CallbackArguments)
 
 	if !(1 == arguments.n && "single listener message" == arguments.m || 2 == arguments.n && "multi listener message" == arguments.m) {

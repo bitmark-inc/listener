@@ -165,7 +165,7 @@ func (listener *Listener) ConnectionCount() int32 {
 
 // The server main loop
 //
-// Waits for incoming connections ans starts ago routine to handle them.
+// Waits for incoming connections ans starts a go routine to handle them.
 // Monitors for shutdown requests and does orderly termination.
 func server(listener *Listener) {
 
@@ -203,19 +203,18 @@ loop:
 		// set keep alive etc.
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			tcpConn.SetKeepAlive(true)
-			tcpConn.SetKeepAlivePeriod(2 * time.Hour)
+			tcpConn.SetKeepAlivePeriod(5 * time.Minute)
 			tcpConn.SetNoDelay(true)
 		}
 
-		// have accepted a new incomming connection
-		// maybe need to check against some limit here
-
+		// connection accepted - handle data
 		listener.waitGroup.Add(1)                 // this counts the new connection
 		atomic.AddInt32(&listener.clientCount, 1) // count the new client connection
 		go func() {
-			conn := tls.Server(conn, listener.tlsConfiguration)
+			defer conn.Close() // ensure the low-level TCP socket will be closed
+			tlsConn := tls.Server(conn, listener.tlsConfiguration)
 			defer listener.waitGroup.Done() // this ends the new connection
-			defer conn.Close()
+			defer tlsConn.Close()
 			if nil != listener.limiter {
 				defer listener.limiter.Decrement()
 			}
@@ -230,7 +229,7 @@ loop:
 			endConnection := make(chan bool)
 
 			clientConnection := ClientConnection{
-				conn:       conn,
+				conn:       tlsConn,
 				request:    request,
 				queue:      queue,
 				closed:     0,
@@ -281,9 +280,9 @@ loop:
 				}
 
 				// only time out read, must not affect writes
-				conn.SetReadDeadline(time.Now().Add(time.Second))
+				tlsConn.SetReadDeadline(time.Now().Add(time.Second))
 				buffer := make([]byte, bytesRequested)
-				n, err := conn.Read(buffer)
+				n, err := tlsConn.Read(buffer)
 				if nil != err {
 					// timeout => loop around an try the same Read again
 					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
