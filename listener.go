@@ -11,7 +11,7 @@ package listener
 
 import (
 	"crypto/tls"
-	"fmt"
+	//"fmt"
 	"io"
 	"net"
 	"sync"
@@ -20,18 +20,18 @@ import (
 )
 
 // set true to enable debugging
-const (
-	//debug debugging = true
-	debug debugging = false
-)
-
-type debugging bool
-
-func (debug debugging) Printf(format string, arguments ...interface{}) {
-	if debug {
-		fmt.Printf(format, arguments...)
-	}
-}
+//const (
+//	//debug debugging = true
+//	debug debugging = false
+//)
+//
+//type debugging bool
+//
+//func (debug debugging) Printf(format string, arguments ...interface{}) {
+//	if debug {
+//		fmt.Printf(format, arguments...)
+//	}
+//}
 
 // struct to hold the connection data
 type Listener struct {
@@ -68,22 +68,22 @@ type Callback func(conn io.ReadWriteCloser, argument interface{})
 // shutdown of the connection if the listener is stopped
 func (conn *ClientConnection) Read(p []byte) (n int, err error) {
 	if nil != conn.readError {
-		debug.Printf("ERROR: %v\n", conn.readError)
+		//debug.Printf("ERROR: %v\n", conn.readError)
 		return 0, conn.readError
 	}
-	debug.Printf("Waiting for data...\n")
+	//debug.Printf("Waiting for data...\n")
 	conn.request <- cap(p) // send the size
 	data := <-conn.queue   // fetch data
-	debug.Printf("data = '%v'\n", data)
+	//debug.Printf("data = '%v'\n", data)
 	bytesRead := len(data)
 	if 0 == bytesRead {
 		conn.readError = io.EOF
 		return 0, io.EOF
 	}
-	debug.Printf("data len: %d, cap: %d\n", len(data), cap(data))
-	debug.Printf("p1   len: %d, cap: %d\n", len(p), cap(p))
+	//debug.Printf("data len: %d, cap: %d\n", len(data), cap(data))
+	//debug.Printf("p1   len: %d, cap: %d\n", len(p), cap(p))
 	copy(p, data[0:bytesRead])
-	debug.Printf("p2   len: %d, cap: %d\n", len(p), cap(p))
+	//debug.Printf("p2   len: %d, cap: %d\n", len(p), cap(p))
 	return bytesRead, nil
 }
 
@@ -94,12 +94,12 @@ func (conn *ClientConnection) Read(p []byte) (n int, err error) {
 // from the TLS connection so that the remote gets a reply to its
 // outstanding request before shutdown.
 func (conn *ClientConnection) Write(p []byte) (n int, err error) {
-	debug.Printf("write len: %d, data: %v\n", len(p), p)
+	//debug.Printf("write len: %d, data: %v\n", len(p), p)
 	n, err = conn.conn.Write(p)
 	if nil != err {
 		conn.writeError = err
 	}
-	debug.Printf("wrote bytes: %d  err: %v\n", n, err)
+	//debug.Printf("wrote bytes: %d  err: %v\n", n, err)
 	return
 }
 
@@ -150,10 +150,10 @@ func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *t
 // just before their next read (their writes complete so a to respond
 // to their last request).
 func (listener *Listener) StopListening() error {
-	debug.Printf("\nInitiate shutdown\n")
+	//debug.Printf("\nInitiate shutdown\n")
 	close(listener.shutdown)
 
-	debug.Printf("\nWait for connections to close\n")
+	//debug.Printf("\nWait for connections to close\n")
 	listener.waitGroup.Wait()
 	return nil
 }
@@ -178,7 +178,7 @@ loop:
 	for {
 		select {
 		case <-listener.shutdown:
-			debug.Printf("Shutdown accept\n")
+			//debug.Printf("Shutdown accept\n")
 			break loop
 		default:
 		}
@@ -190,7 +190,7 @@ loop:
 			continue
 		}
 		if err != nil {
-			debug.Printf("Accept error: %v\n", err)
+			//debug.Printf("Accept error: %v\n", err)
 			continue
 		}
 
@@ -251,10 +251,10 @@ loop:
 					// wait for the byte count
 					select {
 					case <-listener.shutdown:
-						debug.Printf("Shutdown serving connection\n")
+						//debug.Printf("Shutdown serving connection\n")
 						break serving
 					case <-endConnection:
-						debug.Printf("Shutdown serving connection\n")
+						//debug.Printf("Shutdown serving connection\n")
 						break serving
 					case bytesRequested = <-request:
 					}
@@ -262,20 +262,20 @@ loop:
 					// use current bytecount
 					select {
 					case <-listener.shutdown:
-						debug.Printf("Shutdown serving connection\n")
+						//debug.Printf("Shutdown serving connection\n")
 						break serving
 					case <-endConnection:
-						debug.Printf("Shutdown serving connection\n")
+						//debug.Printf("Shutdown serving connection\n")
 						break serving
 					default:
 					}
 				}
-				debug.Printf("Requested bytes = %d\n", bytesRequested)
+				//debug.Printf("Requested bytes = %d\n", bytesRequested)
 
 				// since the rpc callbacks do not appear to detect a write error
 				// we detect it here
 				if nil != clientConnection.writeError {
-					debug.Printf("Connection closed by write error: %v\n", clientConnection.writeError)
+					//debug.Printf("Connection closed by write error: %v\n", clientConnection.writeError)
 					break
 				}
 
@@ -287,24 +287,24 @@ loop:
 					// timeout => loop around an try the same Read again
 					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 						// debug.Printf("Read timeout\n")
-						debug.Printf("R ")
+						//debug.Printf("R ")
 						continue
 					}
 					if io.EOF == err {
-						debug.Printf("Connection closed by client: %v\n", err)
+						//debug.Printf("Connection closed by client: %v\n", err)
 						break
 					}
 					if err != nil {
-						debug.Printf("Read error: %v\n", err)
+						//debug.Printf("Read error: %v\n", err)
 						break
 					}
 				}
-				debug.Printf("buffer len: %d, cap: %d\n", n, cap(buffer))
+				//debug.Printf("buffer len: %d, cap: %d\n", n, cap(buffer))
 				queue <- buffer[0:n]
 				bytesRequested = 0
 			}
-			debug.Printf("Finish handler\n")
+			//debug.Printf("Finish handler\n")
 		}()
 	}
-	debug.Printf("Exiting server loop\n")
+	//debug.Printf("Exiting server loop\n")
 }
