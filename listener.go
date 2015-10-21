@@ -19,20 +19,6 @@ import (
 	"time"
 )
 
-// set true to enable debugging
-//const (
-//	//debug debugging = true
-//	debug debugging = false
-//)
-//
-//type debugging bool
-//
-//func (debug debugging) Printf(format string, arguments ...interface{}) {
-//	if debug {
-//		fmt.Printf(format, arguments...)
-//	}
-//}
-
 // struct to hold the connection data
 type Listener struct {
 	tlsConfiguration *tls.Config
@@ -41,7 +27,7 @@ type Listener struct {
 	socket           *net.TCPListener
 	waitGroup        *sync.WaitGroup
 	clientCount      int32
-	shutdown         chan bool
+	shutdown         bool
 	argument         interface{}
 }
 
@@ -68,22 +54,22 @@ type Callback func(conn io.ReadWriteCloser, argument interface{})
 // shutdown of the connection if the listener is stopped
 func (conn *ClientConnection) Read(p []byte) (n int, err error) {
 	if nil != conn.readError {
-		//debug.Printf("ERROR: %v\n", conn.readError)
+		//fmt.Printf("ERROR: %v\n", conn.readError)
 		return 0, conn.readError
 	}
-	//debug.Printf("Waiting for data...\n")
+	//fmt.Printf("Waiting for data...\n")
 	conn.request <- cap(p) // send the size
 	data := <-conn.queue   // fetch data
-	//debug.Printf("data = '%v'\n", data)
+	//fmt.Printf("data = '%v'\n", data)
 	bytesRead := len(data)
 	if 0 == bytesRead {
 		conn.readError = io.EOF
 		return 0, io.EOF
 	}
-	//debug.Printf("data len: %d, cap: %d\n", len(data), cap(data))
-	//debug.Printf("p1   len: %d, cap: %d\n", len(p), cap(p))
+	//fmt.Printf("data len: %d, cap: %d\n", len(data), cap(data))
+	//fmt.Printf("p1   len: %d, cap: %d\n", len(p), cap(p))
 	copy(p, data[0:bytesRead])
-	//debug.Printf("p2   len: %d, cap: %d\n", len(p), cap(p))
+	//fmt.Printf("p2   len: %d, cap: %d\n", len(p), cap(p))
 	return bytesRead, nil
 }
 
@@ -94,12 +80,12 @@ func (conn *ClientConnection) Read(p []byte) (n int, err error) {
 // from the TLS connection so that the remote gets a reply to its
 // outstanding request before shutdown.
 func (conn *ClientConnection) Write(p []byte) (n int, err error) {
-	//debug.Printf("write len: %d, data: %v\n", len(p), p)
+	//fmt.Printf("write len: %d, data: %v\n", len(p), p)
 	n, err = conn.conn.Write(p)
 	if nil != err {
 		conn.writeError = err
 	}
-	//debug.Printf("wrote bytes: %d  err: %v\n", n, err)
+	//fmt.Printf("wrote bytes: %d  err: %v\n", n, err)
 	return
 }
 
@@ -125,7 +111,7 @@ func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *t
 	if err != nil {
 		return nil, err
 	}
-	l, err := net.ListenTCP(tcpVersion, address)
+	listeningSocket, err := net.ListenTCP(tcpVersion, address)
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +120,8 @@ func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *t
 		callback:         callback,
 		limiter:          limiter,
 		tlsConfiguration: tlsConfiguration,
-		socket:           l,
-		shutdown:         make(chan bool),
+		socket:           listeningSocket,
+		shutdown:         false,
 		waitGroup:        &sync.WaitGroup{},
 		clientCount:      0,
 		argument:         argument,
@@ -150,10 +136,11 @@ func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *t
 // just before their next read (their writes complete so a to respond
 // to their last request).
 func (listener *Listener) StopListening() error {
-	//debug.Printf("\nInitiate shutdown\n")
-	close(listener.shutdown)
+	//fmt.Printf("\nInitiate shutdown\n")
+	listener.shutdown = true
+	listener.socket.Close() // to force shutdown
 
-	//debug.Printf("\nWait for connections to close\n")
+	//fmt.Printf("\nWait for connections to close\n")
 	listener.waitGroup.Wait()
 	return nil
 }
@@ -165,7 +152,7 @@ func (listener *Listener) ConnectionCount() int32 {
 
 // The server main loop
 //
-// Waits for incoming connections ans starts a go routine to handle them.
+// Waits for incoming connections and starts a go routine to handle them.
 // Monitors for shutdown requests and does orderly termination.
 func server(listener *Listener) {
 
@@ -174,30 +161,32 @@ func server(listener *Listener) {
 	listener.waitGroup.Add(1)       // this is for the listen
 	defer listener.waitGroup.Done() // this is for the listen
 
-loop:
-	for {
-		select {
-		case <-listener.shutdown:
-			//debug.Printf("Shutdown accept\n")
-			break loop
-		default:
-		}
+	connectionsMutex := sync.RWMutex{}
+	connections := make(map[net.Conn]bool)
 
-		listener.socket.SetDeadline(time.Now().Add(time.Second))
+	// retry a failed accept before panicking
+	retries := 3
+
+accepting:
+	for {
 		conn, err := listener.socket.Accept()
-		if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
-			//debug.Printf("Accept timeout\n")
-			continue
-		}
 		if err != nil {
-			//debug.Printf("Accept error: %v\n", err)
-			continue
+			//fmt.Printf("Accept error: %v\n", err)
+			if listener.shutdown {
+				break accepting
+			}
+			retries -= 1
+			if retries < 0 {
+				panic("accept failed")
+			}
+			time.Sleep(time.Second)
+			continue accepting
 		}
 
 		// restrict number of clients
 		if nil != listener.limiter && !listener.limiter.Increment() {
 			conn.Close()
-			continue
+			continue accepting
 		}
 
 		// set keep alive etc.
@@ -205,15 +194,29 @@ loop:
 			tcpConn.SetKeepAlive(true)
 			tcpConn.SetKeepAlivePeriod(5 * time.Minute)
 			tcpConn.SetNoDelay(true)
+		} else {
+			panic("unable to convert to TCPConn")
 		}
+
+		// register active connection
+		connectionsMutex.Lock()
+		connections[conn] = true
+		connectionsMutex.Unlock()
 
 		// connection accepted - handle data
 		listener.waitGroup.Add(1)                 // this counts the new connection
 		atomic.AddInt32(&listener.clientCount, 1) // count the new client connection
 		go func() {
-			defer conn.Close() // ensure the low-level TCP socket will be closed
+			defer func() {
+				connectionsMutex.Lock()
+				delete(connections, conn) // unregister active connection
+				conn.Close()              // ensure the low-level TCP socket will be closed
+				connectionsMutex.Unlock()
+				listener.waitGroup.Done() // this ends the new connection
+			}()
+
+			// turn tcp connection into TLS
 			tlsConn := tls.Server(conn, listener.tlsConfiguration)
-			defer listener.waitGroup.Done() // this ends the new connection
 			defer tlsConn.Close()
 			if nil != listener.limiter {
 				defer listener.limiter.Decrement()
@@ -241,70 +244,52 @@ loop:
 				defer atomic.AddInt32(&listener.clientCount, -1) // connection is finished
 				defer close(endConnection)
 				defer clientConnection.Close()
+
 				listener.callback(&clientConnection, listener.argument)
 			}()
 
-			bytesRequested := 0
 		serving:
-			for {
-				if 0 == bytesRequested {
-					// wait for the byte count
-					select {
-					case <-listener.shutdown:
-						//debug.Printf("Shutdown serving connection\n")
-						break serving
-					case <-endConnection:
-						//debug.Printf("Shutdown serving connection\n")
-						break serving
-					case bytesRequested = <-request:
-					}
-				} else {
-					// use current bytecount
-					select {
-					case <-listener.shutdown:
-						//debug.Printf("Shutdown serving connection\n")
-						break serving
-					case <-endConnection:
-						//debug.Printf("Shutdown serving connection\n")
-						break serving
-					default:
-					}
+			for !listener.shutdown {
+				bytesRequested := 0
+				// wait for the byte count
+				select {
+				case <-endConnection:
+					break serving
+				case bytesRequested = <-request:
 				}
-				//debug.Printf("Requested bytes = %d\n", bytesRequested)
+				//fmt.Printf("Requested bytes = %d\n", bytesRequested)
 
 				// since the rpc callbacks do not appear to detect a write error
 				// we detect it here
 				if nil != clientConnection.writeError {
-					//debug.Printf("Connection closed by write error: %v\n", clientConnection.writeError)
-					break
+					//fmt.Printf("Connection closed by write error: %v\n", clientConnection.writeError)
+					break serving
 				}
 
-				// only time out read, must not affect writes
-				tlsConn.SetReadDeadline(time.Now().Add(time.Second))
+				// read some data from the client
 				buffer := make([]byte, bytesRequested)
 				n, err := tlsConn.Read(buffer)
 				if nil != err {
-					// timeout => loop around an try the same Read again
-					if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
-						// debug.Printf("Read timeout\n")
-						//debug.Printf("R ")
-						continue
-					}
 					if io.EOF == err {
-						//debug.Printf("Connection closed by client: %v\n", err)
-						break
+						//fmt.Printf("Connection closed by client\n")
+					} else {
+						//fmt.Printf("Read error: %v\n", err)
 					}
-					if err != nil {
-						//debug.Printf("Read error: %v\n", err)
-						break
-					}
+					break serving
 				}
-				//debug.Printf("buffer len: %d, cap: %d\n", n, cap(buffer))
+				//fmt.Printf("buffer len: %d, cap: %d\n", n, cap(buffer))
 				queue <- buffer[0:n]
-				bytesRequested = 0
 			}
-			//debug.Printf("Finish handler\n")
+			//fmt.Printf("Finish handler\n")
 		}()
 	}
-	//debug.Printf("Exiting server loop\n")
+	//fmt.Printf("Exiting server accepting\n")
+
+	// force close of all still-connected clients to disconnect them
+	connectionsMutex.Lock()
+	//fmt.Printf("closing remaining: %d connections\n", len(connections))
+	for conn := range connections {
+		conn.Close()
+	}
+	connectionsMutex.Unlock()
 }
