@@ -194,6 +194,7 @@ accepting:
 			tcpConn.SetKeepAlive(true)
 			tcpConn.SetKeepAlivePeriod(5 * time.Minute)
 			tcpConn.SetNoDelay(true)
+			tcpConn.SetLinger(10)
 		} else {
 			panic("unable to convert to TCPConn")
 		}
