@@ -6,9 +6,10 @@ package listener_test
 
 import (
 	"crypto/tls"
-	"github.com/bitmark-inc/listener"
 	"testing"
 	"time"
+
+	"github.com/bitmark-inc/listener"
 )
 
 // main test routine

@@ -5,8 +5,9 @@
 package listener_test
 
 import (
-	"github.com/bitmark-inc/listener"
 	"testing"
+
+	"github.com/bitmark-inc/listener"
 )
 
 const (

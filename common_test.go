@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"github.com/bitmark-inc/certgen"
 	"io"
 	"io/ioutil"
 	"net/rpc"
@@ -17,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/bitmark-inc/certgen"
 )
 
 // Common settings and functions for listener tests

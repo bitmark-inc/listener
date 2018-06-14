@@ -8,9 +8,10 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/bitmark-inc/logger"
 	"net"
 	"sync/atomic"
+
+	"github.com/bitmark-inc/logger"
 )
 
 const (
