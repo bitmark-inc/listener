@@ -6,6 +6,6 @@ package listener
 
 const (
 	Major   = "1"
-	Minor   = "2"
+	Minor   = "3"
 	Version = Major + "." + Minor
 )
