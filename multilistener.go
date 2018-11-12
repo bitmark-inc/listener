@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 Bitmark Inc.
+// Copyright (c) 2014-2018 Bitmark Inc.
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -111,21 +111,21 @@ func (server *MultiListener) Start(argument interface{}) {
 		return
 	}
 
-	// start all listeners
+start_listeners:
 	for i, l := range server.listeners {
 
 		// start one listener
 		listener, err := StartListening(l.tcp, l.address, server.tlsConfiguration, server.limiter, server.callback, argument)
 		if err != nil {
 			server.log.Warnf("listen %d failed for %s/%s error: %v", i, l.tcp, l.address, err)
-			continue
+			continue start_listeners
 		}
 
 		l.listener = listener
 	}
 }
 
-// Stop the rpc server
+// Stop the RPC server
 func (server *MultiListener) Stop() {
 
 	// no need to stop if already stopped

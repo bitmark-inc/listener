@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 Bitmark Inc.
+// Copyright (c) 2014-2018 Bitmark Inc.
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,7 +11,6 @@ package listener
 
 import (
 	"crypto/tls"
-	//"fmt"
 	"io"
 	"net"
 	"sync"
@@ -42,7 +41,7 @@ type ClientConnection struct {
 	queue      <-chan []byte
 	closed     uint32
 	readError  error // this save error to feed back to callback
-	writeError error // this is to abort the main loop as rpc server currenty does not detect write errors
+	writeError error // this is to abort the main loop as rpc server currently does not detect write errors
 }
 
 // the call back routine reads, writes and finally closes a connection
@@ -99,12 +98,12 @@ func (conn *ClientConnection) Close() error {
 
 // Start a new listener instance
 //
-// Open a listining port and start a go routine to handle the actual
+// Open a listening port and start a go routine to handle the actual
 // accepts.  Return a struct that can be used to shutdown the listener
 // and all active connections in an orderly manner.
 //
-// Note that tcpversion must be either "tcp4" or "tcp6"
-// and the listenAddress must be the a valip IPv4:port or IPv6:port
+// Note that tcp version must be either "tcp4" or "tcp6"
+// and the listenAddress must be the a valid IPv4:port or IPv6:port
 func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *tls.Config, limiter *Limiter, callback Callback, argument interface{}) (*Listener, error) {
 
 	address, err := net.ResolveTCPAddr(tcpVersion, listenAddress)
@@ -132,15 +131,15 @@ func StartListening(tcpVersion string, listenAddress string, tlsConfiguration *t
 
 // Stop the listener
 //
-// Stops acceptiong new connections.  Stops all active connections
+// Stops accepting new connections.  Stops all active connections
 // just before their next read (their writes complete so a to respond
 // to their last request).
 func (listener *Listener) StopListening() error {
-	//fmt.Printf("\nInitiate shutdown\n")
+	//fmt.Printf("Initiate shutdown\n")
 	listener.shutdown = true
 	listener.socket.Close() // to force shutdown
 
-	//fmt.Printf("\nWait for connections to close\n")
+	//fmt.Printf("Wait for connections to close\n")
 	listener.waitGroup.Wait()
 	return nil
 }
@@ -219,6 +218,7 @@ accepting:
 			// turn tcp connection into TLS
 			tlsConn := tls.Server(conn, listener.tlsConfiguration)
 			defer tlsConn.Close()
+
 			if nil != listener.limiter {
 				defer listener.limiter.Decrement()
 			}
@@ -249,6 +249,8 @@ accepting:
 				listener.callback(&clientConnection, listener.argument)
 			}()
 
+			limiter := listener.limiter
+
 		serving:
 			for !listener.shutdown {
 				bytesRequested := 0
@@ -267,15 +269,20 @@ accepting:
 					break serving
 				}
 
+				// limit bytes per second
+				if nil != limiter && !limiter.RateLimit(bytesRequested) {
+					break serving
+				}
+
 				// read some data from the client
 				buffer := make([]byte, bytesRequested)
 				n, err := tlsConn.Read(buffer)
 				if nil != err {
-					if io.EOF == err {
-						//fmt.Printf("Connection closed by client\n")
-					} else {
-						//fmt.Printf("Read error: %v\n", err)
-					}
+					// if io.EOF == err {
+					// 	fmt.Printf("Connection closed by client\n")
+					// } else {
+					// 	fmt.Printf("Read error: %v\n", err)
+					// }
 					break serving
 				}
 				//fmt.Printf("buffer len: %d, cap: %d\n", n, cap(buffer))

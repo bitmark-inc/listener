@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 Bitmark Inc.
+// Copyright (c) 2014-2018 Bitmark Inc.
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/rpc"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/bitmark-inc/certgen"
+	"github.com/bitmark-inc/logger"
 )
 
 // Common settings and functions for listener tests
@@ -32,6 +34,7 @@ const (
 const (
 	keyFileName         = "listener.key"
 	certificateFileName = "listener.crt"
+	logFileName         = "listener.log"
 )
 
 // the number of test loops
@@ -39,16 +42,57 @@ const (
 	staticCalls = 2
 	clientLoops = 8
 	clientCalls = 10
+
+	testDuration = 65 * time.Second
 )
+
+type bwRatio struct {
+	bandwidth float64 // mega bits per second
+	ratio     float64 // for testing
+}
+
+var bandwidths = []bwRatio{
+	{ // this is the comparison value
+		bandwidth: 1 * 1000000, //  Mbps
+		ratio:     0,           // zero ⇒ do not check
+	},
+	{
+		bandwidth: 10 * 1000000, // Mbps
+		ratio:     10,
+	},
+	{
+		bandwidth: 24 * 1000000, // Mbps
+		ratio:     24,
+	},
+}
 
 // cleanup routine
 func removeGeneratedFiles() {
 	os.Remove(keyFileName)
 	os.Remove(certificateFileName)
+	os.Remove(logFileName)
 }
 
 func setup(t *testing.T) error {
+
 	removeGeneratedFiles()
+
+	// internal logger
+	logging := logger.Configuration{
+		Directory: ".",
+		File:      logFileName,
+		Size:      1048576,
+		Count:     10,
+		Console:   true,
+		Levels: map[string]string{
+			logger.DefaultTag: "info",
+		},
+	}
+
+	// start logging
+	if err := logger.Initialise(logging); nil != err {
+		panic(fmt.Sprintf("logger setup failed with error: %s", err))
+	}
 
 	org := "just a self signed cert"
 	validUntil := time.Now().Add(10 * 365 * 24 * time.Hour)
@@ -68,6 +112,7 @@ func setup(t *testing.T) error {
 }
 
 func teardown(t *testing.T) {
+	logger.Finalise()
 	removeGeneratedFiles()
 }
 
@@ -150,7 +195,7 @@ func simpleClient(t *testing.T, n int, address string, totalSuccesses *int32) {
 
 	c := jsonrpc.NewClient(conn)
 
-	for i := 0; i < clientCalls; i++ {
+	for i := 0; i < clientCalls; i += 1 {
 		err = c.Call("Arith.Multiply", args, &reply)
 		if err != nil {
 			t.Errorf("client %d, %s arith error: %v", n, address, err)
@@ -164,6 +209,55 @@ func simpleClient(t *testing.T, n int, address string, totalSuccesses *int32) {
 
 		// uncomment to debug
 		t.Logf("client %d, %s [%d]: %d * %d = %d", n, address, i, args.A, args.B, reply)
+
+		args.A += 3*i + n
+		args.B += 5*i - n
+	}
+}
+
+// used to test the listener
+func timedClient(t *testing.T, n int, address string, dur time.Duration, totalSuccesses *int32) {
+
+	pem, err := ioutil.ReadFile(certificateFileName)
+	if err != nil {
+		t.Errorf("client %d, %s failed to read certificate: %v", n, address, err)
+		return
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(pem)
+
+	tlsConfiguration := tls.Config{
+		RootCAs: pool,
+	}
+
+	conn, err := tls.Dial("tcp", address, &tlsConfiguration)
+
+	if err != nil {
+		t.Errorf("client %d, %s failed to dial: %v", n, address, err)
+		return
+	}
+	defer conn.Close()
+
+	args := &Args{7, 8}
+	var reply int
+
+	c := jsonrpc.NewClient(conn)
+
+	end := time.Now().Add(dur)
+	for i := 0; time.Now().Before(end); i += 1 {
+		err = c.Call("Arith.Multiply", args, &reply)
+		if err != nil {
+			t.Errorf("client %d, %s arith error: %v", n, address, err)
+		}
+		wanted := args.A * args.B
+		if reply == wanted {
+			atomic.AddInt32(totalSuccesses, 1)
+		} else {
+			t.Errorf("client %d, %s wanted: %d, got %v", n, address, wanted, reply)
+		}
+
+		// uncomment to debug
+		//t.Logf("client %d, %s [%d]: %d * %d = %d", n, address, i, args.A, args.B, reply)
 
 		args.A += 3*i + n
 		args.B += 5*i - n

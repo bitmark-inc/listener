@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 Bitmark Inc.
+// Copyright (c) 2014-2018 Bitmark Inc.
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,13 +10,19 @@ package listener
 
 import (
 	"sync"
+	"time"
+
+	"golang.org/x/time/rate"
 )
+
+const oneMegaByte = 1048576
 
 // struct to hold the connection data
 type Limiter struct {
 	sync.Mutex
 	maximumClientCount int
 	currentClientCount int
+	rateLimiter        *rate.Limiter
 }
 
 // Create a new limiter
@@ -30,6 +36,22 @@ func NewLimiter(maximumCount int) (limiter *Limiter) {
 	return &Limiter{
 		maximumClientCount: maximumCount,
 		currentClientCount: 0,
+		rateLimiter:        nil,
+	}
+}
+
+// Create a new limiter
+//
+// Current count is initially zero and the maximum is specified as a
+// parameter.
+func NewBandwidthLimiter(maximumCount int, bandwidthbps float64) (limiter *Limiter) {
+	if maximumCount <= 0 {
+		panic("NewLimiter with zero or negative maximum")
+	}
+	return &Limiter{
+		maximumClientCount: maximumCount,
+		currentClientCount: 0,
+		rateLimiter:        rate.NewLimiter(rate.Limit(bandwidthbps/8), oneMegaByte),
 	}
 }
 
@@ -41,12 +63,13 @@ func NewLimiter(maximumCount int) (limiter *Limiter) {
 // Decrement will have to be used to bring the limiter down.
 func (limiter *Limiter) SetMaximum(maximumCount int) int {
 	if maximumCount <= 0 {
-		panic("SetLimiter with zero or negative maximum")
+		panic("SetMaximum with zero or negative maximum")
 	}
 	limiter.Lock()
 	defer limiter.Unlock()
 	old := limiter.maximumClientCount
 	limiter.maximumClientCount = maximumCount
+
 	return old
 }
 
@@ -54,7 +77,7 @@ func (limiter *Limiter) SetMaximum(maximumCount int) int {
 //
 // Read the current count, note that this may not be correct if other
 // go routines are accessing the limiter.  This is really intended so
-// statistics/debugging display can look at a snapshote of limiter state.
+// statistics/debugging display can look at a snapshot of limiter state.
 func (limiter *Limiter) CurrentCount() int {
 	limiter.Lock()
 	defer limiter.Unlock()
@@ -77,7 +100,7 @@ func (limiter *Limiter) Increment() bool {
 
 // Decrement count
 //
-// Deccrement the current count on a Limiter iff the currentCount is
+// Decrement the current count on a Limiter iff the currentCount is
 // greater than zero.
 func (limiter *Limiter) Decrement() bool {
 	limiter.Lock()
@@ -87,4 +110,16 @@ func (limiter *Limiter) Decrement() bool {
 		return true
 	}
 	return false
+}
+
+// rate limit
+func (limiter *Limiter) RateLimit(bytesRequested int) bool {
+	if nil != limiter.rateLimiter {
+		r := limiter.rateLimiter.ReserveN(time.Now(), bytesRequested)
+		if !r.OK() {
+			return false
+		}
+		time.Sleep(r.Delay())
+	}
+	return true
 }
